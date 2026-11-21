@@ -1386,7 +1386,7 @@ impl<'a, 'b> PlanStatement<'a, 'b> {
                     index: 0,
                 }
                 .into(),
-                filter: stmt::Filter::new(true),
+                filter: stmt::Filter::ALL,
                 returning: stmt::Returning::Project(conditional_probe_projection(cte_column(0, 0))),
                 distinct: false,
             })
@@ -1403,7 +1403,7 @@ impl<'a, 'b> PlanStatement<'a, 'b> {
                 index: 1,
             }
             .into(),
-            filter: true.into(),
+            filter: stmt::Filter::ALL,
             returning: stmt::Returning::Project(stmt::Expr::record_from_vec(vec![stmt::Expr::eq(
                 stmt::ExprColumn {
                     nesting: 0,
@@ -1420,7 +1420,7 @@ impl<'a, 'b> PlanStatement<'a, 'b> {
         });
         // The write applies only when the two counts agree — AND that guard
         // onto the write's filter.
-        let guarded_filter = stmt::Filter::new(stmt::Expr::and(filter, counts_agree));
+        let guarded_filter = stmt::Filter::and(filter, counts_agree);
         match &mut write {
             stmt::Statement::Update(update) => update.filter = guarded_filter,
             stmt::Statement::Delete(delete) => delete.filter = guarded_filter,
@@ -1457,7 +1457,7 @@ impl<'a, 'b> PlanStatement<'a, 'b> {
                     index: 1,
                 }
                 .into(),
-                filter: stmt::Filter::new(true),
+                filter: stmt::Filter::ALL,
                 returning: stmt::Returning::Project(stmt::Expr::record_from_vec(vec![
                     cte_column(0, 0),
                     cte_column(0, 1),
@@ -1494,7 +1494,7 @@ impl<'a, 'b> PlanStatement<'a, 'b> {
                         }],
                     },
                 ),
-                filter: stmt::Filter::new(true),
+                filter: stmt::Filter::ALL,
                 returning: stmt::Returning::Project(stmt::Expr::record_from_vec(columns)),
                 distinct: false,
             })
@@ -1550,17 +1550,14 @@ impl<'a, 'b> PlanStatement<'a, 'b> {
     fn conditional_write_parts(
         &self,
         mut stmt: stmt::Statement,
-    ) -> (stmt::Expr, stmt::Expr, stmt::Source, stmt::Statement) {
+    ) -> (stmt::Expr, stmt::Filter, stmt::Source, stmt::Statement) {
         let condition = stmt
             .condition_mut_unwrap()
             .expr
             .take()
             .expect("conditional write without condition");
 
-        let filter = stmt
-            .filter()
-            .and_then(|filter| filter.expr.clone())
-            .expect("conditional write without filter");
+        let filter = stmt.filter_or_default().clone();
 
         let source = match &stmt {
             stmt::Statement::Update(update) => stmt::Source::table(update.target.as_table_unwrap()),
@@ -1647,10 +1644,7 @@ impl<'a, 'b> PlanStatement<'a, 'b> {
             )));
         }
 
-        let mut row_filter = {
-            let f = stmt.filter_expr_unwrap();
-            if f.is_true() { None } else { Some(f.clone()) }
-        };
+        let mut row_filter = stmt.filter_or_default().expr.clone();
         let (_, inputs) = self.rewrite_exprs_for_mir(row_filter.iter_mut(), 0);
         self.legalize_kv_expr(&mut row_filter);
 
@@ -2377,13 +2371,13 @@ fn cte_column(table: usize, column: usize) -> stmt::Expr {
 /// committed row version and the rows cannot change before the write applies.
 fn conditional_probe_query(
     condition: stmt::Expr,
-    filter: stmt::Expr,
+    filter: stmt::Filter,
     source: stmt::Source,
     lock: bool,
 ) -> stmt::Query {
     stmt::Query::builder(stmt::Select {
         source,
-        filter: stmt::Filter::new(filter),
+        filter,
         returning: stmt::Returning::Project(stmt::Expr::record_from_vec(vec![condition])),
         distinct: false,
     })

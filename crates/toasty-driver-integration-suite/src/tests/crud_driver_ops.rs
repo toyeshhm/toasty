@@ -191,3 +191,89 @@ pub async fn basic_crud(test: &mut Test) -> Result<()> {
     assert!(test.log().is_empty(), "Log should be empty");
     Ok(())
 }
+
+/// A statement that matches every row reaches a SQL driver with no filter
+/// expression, so no `WHERE` clause is serialized.
+#[driver_test(id(ID), requires(sql))]
+pub async fn match_all_has_no_filter(test: &mut Test) -> Result<()> {
+    #[derive(Debug, toasty::Model)]
+    struct User {
+        #[key]
+        #[auto]
+        id: ID,
+
+        name: String,
+        age: i32,
+    }
+
+    let mut db = test.setup_db(models!(User)).await;
+
+    toasty::create!(User::[
+        { name: "Alice", age: 30 },
+        { name: "Bob", age: 20 },
+    ])
+    .exec(&mut db)
+    .await?;
+
+    test.log().clear();
+
+    // ========== SELECT ==========
+    let users = User::all().exec(&mut db).await?;
+    assert_eq!(2, users.len());
+
+    let (op, _) = test.log().pop();
+    assert_struct!(op, Operation::QuerySql({
+        stmt: Statement::Query({
+            body: ExprSet::Select({
+                filter.expr: None,
+            }),
+        }),
+        params: [],
+    }));
+
+    // A filter that is literally `true` is the same statement.
+    let users = User::filter(toasty::stmt::Expr::from_untyped(Expr::TRUE))
+        .exec(&mut db)
+        .await?;
+    assert_eq!(2, users.len());
+
+    let (op, _) = test.log().pop();
+    assert_struct!(op, Operation::QuerySql({
+        stmt: Statement::Query({
+            body: ExprSet::Select({
+                filter.expr: None,
+            }),
+        }),
+        params: [],
+    }));
+
+    // ========== UPDATE ==========
+    User::all().update().age(40).exec(&mut db).await?;
+
+    let (op, resp) = test.log().pop();
+    assert_struct!(op, Operation::QuerySql({
+        stmt: Statement::Update({
+            filter.expr: None,
+        }),
+    }));
+    assert_struct!(resp, {
+        values: Rows::Count(2),
+    });
+
+    // ========== DELETE ==========
+    User::all().delete().exec(&mut db).await?;
+
+    let (op, resp) = test.log().pop();
+    assert_struct!(op, Operation::QuerySql({
+        stmt: Statement::Delete({
+            filter.expr: None,
+        }),
+        params: [],
+    }));
+    assert_struct!(resp, {
+        values: Rows::Count(2),
+    });
+
+    assert!(test.log().is_empty(), "Log should be empty");
+    Ok(())
+}

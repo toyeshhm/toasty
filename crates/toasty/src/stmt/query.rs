@@ -1,5 +1,5 @@
 use super::{
-    Delete, Expr, IntoExpr, IntoStatement, List, RelationInsert, RelationRemove, Statement, Value,
+    Delete, Expr, IntoExpr, IntoStatement, List, RelationInsert, RelationRemove, Statement,
 };
 use crate::{
     Executor, Result,
@@ -609,8 +609,7 @@ impl<M: Model> Query<List<M>> {
     /// let q = Query::<List<User>>::all();
     /// ```
     pub fn all() -> Self {
-        let filter = stmt::Expr::Value(Value::from_bool(true));
-        let mut query = stmt::Query::new_select(M::id(), filter);
+        let mut query = stmt::Query::new_select(M::id(), stmt::Filter::ALL);
         query.single = false;
         Self::from_untyped(query)
     }

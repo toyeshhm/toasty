@@ -104,6 +104,11 @@ impl VisitMut for Simplify<'_> {
         let previous = std::mem::replace(&mut self.positive_filter, true);
         stmt::visit_mut::visit_filter_mut(self, filter);
         self.positive_filter = previous;
+
+        // `Filter::ALL` is the one encoding of "match all rows".
+        if filter.expr.as_ref().is_some_and(Expr::is_true) {
+            filter.expr = None;
+        }
     }
 
     fn visit_expr_match_mut(&mut self, i: &mut stmt::ExprMatch) {
